@@ -183,11 +183,13 @@ export function Select({
   value,
   onChange,
   children,
+  testId,
 }: {
   label?: string;
   value: string;
   onChange: (value: string) => void;
   children: React.ReactNode;
+  testId?: string;
 }) {
   return (
     <label className={styles.selectLabel}>
@@ -195,6 +197,7 @@ export function Select({
       <select
         className={styles.select}
         value={value}
+        data-testid={testId}
         onChange={(e) => onChange(e.target.value)}
       >
         {children}

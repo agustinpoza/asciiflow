@@ -417,12 +417,13 @@ test("draw box, export, and copy to clipboard", async ({ page, context }) => {
     "└───┘",
   ]);
 
-  // Copy to clipboard
+  // Copy to clipboard. Windows normalizes line endings to CRLF when writing
+  // plain text to the clipboard, so compare with normalized newlines.
   await page.getByTestId("copy-to-clipboard").click();
   const clipboardText = await page.evaluate(() =>
     navigator.clipboard.readText()
   );
-  expect(clipboardText).toBe(exportedText);
+  expect(clipboardText.replace(/\r\n/g, "\n")).toBe(exportedText);
 });
 
 // ---------------------------------------------------------------------------
@@ -711,4 +712,184 @@ test("backspace erases committed text underneath", async ({ page }) => {
 
   text = await getCommittedText(page);
   expect(text).toBe("");
+});
+
+// ---------------------------------------------------------------------------
+// Background image
+// ---------------------------------------------------------------------------
+
+/** Create a solid red PNG buffer and import it as the background image. */
+async function importBackground(page, { scale = "100" } = {}) {
+  await page.getByTestId("bg-import-button").click();
+  await expect(page.getByTestId("bg-dialog")).toBeVisible();
+
+  const dataUrl = await page.evaluate(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 100;
+    canvas.height = 100;
+    const context = canvas.getContext("2d");
+    context.fillStyle = "#ff0000";
+    context.fillRect(0, 0, 100, 100);
+    return canvas.toDataURL("image/png");
+  });
+  const buffer = Buffer.from(dataUrl.split(",")[1], "base64");
+
+  await page.getByTestId("bg-scale").selectOption(scale);
+  await page.getByTestId("bg-file").setInputFiles({
+    name: "red.png",
+    mimeType: "image/png",
+    buffer,
+  });
+  await expect(page.getByTestId("bg-meta")).toBeVisible({ timeout: 5000 });
+
+  await page.getByTestId("bg-import").click();
+  await expect(page.getByTestId("bg-opacity")).toBeVisible();
+  await expect(page.getByTestId("bg-dialog")).toHaveCount(0);
+}
+
+async function hideGrid(page) {
+  const rv = await getRenderedVersion(page);
+  await page.getByTestId("toggle-grid").click();
+  await waitForRender(page, rv);
+}
+
+/** Sample a canvas pixel at an offset (in CSS px) from the viewport center. */
+async function sampleBackground(page, dx = 0, dy = 0) {
+  return page.evaluate(
+    ({ dx, dy }) => {
+      const canvas = document.getElementById("ascii-canvas");
+      const context = canvas.getContext("2d");
+      const dpr = window.devicePixelRatio || 1;
+      const x = Math.round(canvas.width / 2 + dx * dpr);
+      const y = Math.round(canvas.height / 2 + dy * dpr);
+      const data = context.getImageData(x, y, 1, 1).data;
+      return { r: data[0], g: data[1], b: data[2], a: data[3] };
+    },
+    { dx, dy }
+  );
+}
+
+test.describe("background image", () => {
+  test("imports centered behind the canvas", async ({ page }) => {
+    await page.goto("/");
+    await page.getByTestId("view-button").click();
+    await importBackground(page, { scale: "100" });
+    await hideGrid(page);
+
+    const background = await page.evaluate(() =>
+      window.__asciiflow__.getBackground()
+    );
+    expect(background).not.toBeNull();
+    expect(background.naturalW).toBe(100);
+    expect(background.naturalH).toBe(100);
+    expect(background.scale).toBe(1);
+    expect(background.opacity).toBeCloseTo(0.35, 2);
+    expect(background.visible).toBe(true);
+    // Default offset is the grid center (MAX_GRID_WIDTH/2, MAX_GRID_HEIGHT/2).
+    expect(background.centerCell.x).toBeCloseTo(1000, 0);
+    expect(background.centerCell.y).toBeCloseTo(300, 0);
+
+    await expect
+      .poll(async () => (await sampleBackground(page)).a)
+      .toBeGreaterThan(0);
+    const center = await sampleBackground(page);
+    expect(center.r).toBeGreaterThan(200);
+    // Outside the 100x100 image (half width is 50 px).
+    expect((await sampleBackground(page, 80, 0)).a).toBe(0);
+  });
+
+  test("opacity slider controls how strongly the image shows", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await page.getByTestId("view-button").click();
+    await importBackground(page);
+    await hideGrid(page);
+
+    await expect
+      .poll(async () => (await sampleBackground(page)).a)
+      .toBeGreaterThan(0);
+
+    let rv = await getRenderedVersion(page);
+    await page.getByTestId("bg-opacity").fill("0");
+    await waitForRender(page, rv);
+    expect((await sampleBackground(page)).a).toBe(0);
+
+    rv = await getRenderedVersion(page);
+    await page.getByTestId("bg-opacity").fill("100");
+    await waitForRender(page, rv);
+    const opaque = await sampleBackground(page);
+    expect(opaque.a).toBe(255);
+    expect(opaque.r).toBe(255);
+    await expect(page.getByTestId("bg-opacity-value")).toHaveText("100%");
+  });
+
+  test("scale changes the size and remove clears the image", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await page.getByTestId("view-button").click();
+    await importBackground(page, { scale: "50" });
+    await hideGrid(page);
+
+    // 50% of 100px => 50px wide, so 20px from center is inside and 40px outside.
+    await expect
+      .poll(async () => (await sampleBackground(page, 20, 0)).a)
+      .toBeGreaterThan(0);
+    expect((await sampleBackground(page, 40, 0)).a).toBe(0);
+    await expect(page.getByTestId("bg-scale-value")).toHaveText("50%");
+
+    const rv = await getRenderedVersion(page);
+    await page.getByTestId("bg-remove").click();
+    await expect(page.getByTestId("bg-opacity")).toHaveCount(0);
+    await waitForRender(page, rv);
+    expect((await sampleBackground(page)).a).toBe(0);
+    expect(
+      await page.evaluate(() => window.__asciiflow__.getBackground())
+    ).toBeNull();
+  });
+
+  test("image stays visible while placing a character", async ({ page }) => {
+    await page.goto("/");
+    await page.getByTestId("view-button").click();
+    await importBackground(page, { scale: "100" });
+    await hideGrid(page);
+
+    // Draw a character and hold the mouse down: the in-progress cell used to be
+    // filled with an opaque gray overlay, hiding the image behind it.
+    await selectTool(page, "freeform");
+    const cell = await getCellSize(page);
+    const start = await cellToPixel(page, 0, 0);
+    const end = await cellToPixel(page, 2, 0);
+    const rv = await getRenderedVersion(page);
+    await page.mouse.move(start.x, start.y);
+    await page.mouse.down();
+    await page.mouse.move(end.x, end.y);
+    await waitForRender(page, rv);
+
+    // The cell the pointer started on sits just below-right of the center.
+    for (const dx of [cell.w / 2, cell.w * 1.5]) {
+      const held = await sampleBackground(page, dx, cell.h / 3);
+      expect(held.r).toBeGreaterThan(200);
+      expect(held.r - held.g).toBeGreaterThan(30);
+    }
+
+    await page.mouse.up();
+  });
+
+  test("background survives a reload", async ({ page }) => {
+    await page.goto("/");
+    await page.getByTestId("view-button").click();
+    await importBackground(page);
+    await hideGrid(page);
+
+    await page.reload();
+    await page.getByTestId("view-button").click();
+
+    await expect(page.getByTestId("bg-opacity")).toBeVisible();
+    await expect(page.getByTestId("bg-opacity-value")).toHaveText("35%");
+    await expect
+      .poll(async () => (await sampleBackground(page)).a)
+      .toBeGreaterThan(0);
+  });
 });

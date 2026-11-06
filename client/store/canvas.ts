@@ -1,3 +1,6 @@
+import {
+  clampBackgroundScale,
+} from "#asciiflow/client/background_scale";
 import { Box } from "#asciiflow/client/common";
 import * as constants from "#asciiflow/client/constants";
 import { Layer, LayerView } from "#asciiflow/client/layer";
@@ -10,6 +13,57 @@ import { IVector, Vector } from "#asciiflow/client/vector";
 // We convert to/from current pixel sizes on read/write so existing data just works.
 const STORED_CHAR_PIXELS_H = 9;
 const STORED_CHAR_PIXELS_V = 16;
+
+export const DEFAULT_BACKGROUND_OPACITY = 0.35;
+
+/** Image blob, stored once per drawing (it is usually the largest value). */
+interface IStoredBackgroundImage {
+  dataUrl: string;
+  naturalW: number;
+  naturalH: number;
+}
+
+/** Cheap settings, written whenever the slider moves. */
+interface IStoredBackgroundSettings {
+  scale: number;
+  opacity: number;
+  visible: boolean;
+  centerCell: IVector;
+}
+
+export interface BackgroundImage
+  extends IStoredBackgroundImage,
+    IStoredBackgroundSettings {}
+
+export interface IBackgroundSource {
+  dataUrl: string;
+  naturalW: number;
+  naturalH: number;
+}
+
+function clampOpacity(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_BACKGROUND_OPACITY;
+  }
+  return Math.min(1, Math.max(0, value));
+}
+
+/**
+ * Writes a value, returning false instead of throwing when localStorage is
+ * full (background images can be large).
+ */
+function tryWritePersistent<T>(
+  key: string,
+  value: T,
+  stringifier: IStringifier<T> = new JSONStringifier() as any
+): boolean {
+  try {
+    writePersistent(key, value, stringifier);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function readPersistent<T>(
   key: string,
@@ -47,6 +101,7 @@ export class CanvasStore {
   private _offset: IVector;
   private _scratch: Layer = new Layer();
   private _selection: Box | undefined = undefined;
+  private _background: BackgroundImage | null = null;
   // Selection snapshots tracked alongside the undo/redo layer stacks, plus the
   // selection captured at the start of the current scratch gesture.
   private _undoSelections: (Box | undefined)[] = [];
@@ -59,6 +114,8 @@ export class CanvasStore {
   private redoKey: string;
   private zoomKey: string;
   private offsetKey: string;
+  private backgroundImageKey: string;
+  private backgroundSettingsKey: string;
 
   constructor(
     public readonly drawingId: DrawingId,
@@ -69,6 +126,8 @@ export class CanvasStore {
     this.redoKey = storageKey(drawingId, "redo-layers");
     this.zoomKey = storageKey(drawingId, "zoom");
     this.offsetKey = storageKey(drawingId, "offset");
+    this.backgroundImageKey = storageKey(drawingId, "background-image");
+    this.backgroundSettingsKey = storageKey(drawingId, "background-settings");
 
     this._committed = drawingId.shareSpec
       ? new DrawingStringifier().deserialize(drawingId.shareSpec).layer
@@ -95,6 +154,41 @@ export class CanvasStore {
     this._offset = {
       x: (storedOffset.x / STORED_CHAR_PIXELS_H) * constants.CHAR_PIXELS_H,
       y: (storedOffset.y / STORED_CHAR_PIXELS_V) * constants.CHAR_PIXELS_V,
+    };
+
+    const storedImage = readPersistent<IStoredBackgroundImage | null>(
+      this.backgroundImageKey,
+      null
+    );
+    const storedSettings = readPersistent<IStoredBackgroundSettings | null>(
+      this.backgroundSettingsKey,
+      null
+    );
+    if (
+      storedImage &&
+      typeof storedImage.dataUrl === "string" &&
+      storedImage.dataUrl.length > 0 &&
+      storedImage.naturalW > 0 &&
+      storedImage.naturalH > 0
+    ) {
+      this._background = {
+        dataUrl: storedImage.dataUrl,
+        naturalW: storedImage.naturalW,
+        naturalH: storedImage.naturalH,
+        scale: clampBackgroundScale(storedSettings?.scale ?? 1),
+        opacity: clampOpacity(
+          storedSettings?.opacity ?? DEFAULT_BACKGROUND_OPACITY
+        ),
+        visible: storedSettings?.visible ?? true,
+        centerCell: storedSettings?.centerCell ?? this.offsetInCells(),
+      };
+    }
+  }
+
+  private offsetInCells(): IVector {
+    return {
+      x: this._offset.x / constants.CHAR_PIXELS_H,
+      y: this._offset.y / constants.CHAR_PIXELS_V,
     };
   }
 
@@ -148,6 +242,107 @@ export class CanvasStore {
       y: (value.y / constants.CHAR_PIXELS_V) * STORED_CHAR_PIXELS_V,
     });
     this.notify();
+  }
+
+  get background(): BackgroundImage | null {
+    return this._background;
+  }
+
+  /**
+   * Stores a new background image, centered on the current viewport. Returns
+   * false when the image could not be persisted (e.g. quota exceeded); in that
+   * case it stays available for the current session only.
+   */
+  importBackground(source: IBackgroundSource, scale: number): boolean {
+    this._background = {
+      dataUrl: source.dataUrl,
+      naturalW: source.naturalW,
+      naturalH: source.naturalH,
+      scale: clampBackgroundScale(scale),
+      opacity: DEFAULT_BACKGROUND_OPACITY,
+      visible: true,
+      centerCell: this.offsetInCells(),
+    };
+    const persisted = tryWritePersistent(this.backgroundImageKey, {
+      dataUrl: source.dataUrl,
+      naturalW: source.naturalW,
+      naturalH: source.naturalH,
+    });
+    if (persisted) {
+      this.writeBackgroundSettings();
+    }
+    this.notify();
+    return persisted;
+  }
+
+  setBackgroundScale(scale: number) {
+    if (!this._background) {
+      return;
+    }
+    this._background = {
+      ...this._background,
+      scale: clampBackgroundScale(scale),
+    };
+    this.writeBackgroundSettings();
+    this.notify();
+  }
+
+  setBackgroundOpacity(opacity: number) {
+    if (!this._background) {
+      return;
+    }
+    this._background = {
+      ...this._background,
+      opacity: clampOpacity(opacity),
+    };
+    this.writeBackgroundSettings();
+    this.notify();
+  }
+
+  setBackgroundVisible(visible: boolean) {
+    if (!this._background) {
+      return;
+    }
+    this._background = { ...this._background, visible };
+    this.writeBackgroundSettings();
+    this.notify();
+  }
+
+  /** Centers the image on the currently visible viewport. */
+  recenterBackground() {
+    if (!this._background) {
+      return;
+    }
+    this._background = {
+      ...this._background,
+      centerCell: this.offsetInCells(),
+    };
+    this.writeBackgroundSettings();
+    this.notify();
+  }
+
+  removeBackground() {
+    this._background = null;
+    try {
+      localStorage.removeItem(this.backgroundImageKey);
+      localStorage.removeItem(this.backgroundSettingsKey);
+    } catch {
+      // Ignore storage failures; the in-memory state was already cleared.
+    }
+    this.notify();
+  }
+
+  private writeBackgroundSettings() {
+    if (!this._background) {
+      return;
+    }
+    const { scale, opacity, visible, centerCell } = this._background;
+    tryWritePersistent(this.backgroundSettingsKey, {
+      scale,
+      opacity,
+      visible,
+      centerCell,
+    } as IStoredBackgroundSettings);
   }
 
   get scratch() {

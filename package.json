@@ -6,7 +6,10 @@
     "#asciiflow/*": "./*"
   },
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "build:local": "node scripts/local/build.mjs",
+    "serve:local": "node scripts/local/serve.mjs",
+    "dev:local": "node scripts/local/dev.mjs"
   },
   "type": "module",
   "dependencies": {

@@ -69,6 +69,19 @@ async function render() {
   getZoom: () => store.currentCanvas.zoom,
   getOffset: () => ({ x: store.currentCanvas.offset.x, y: store.currentCanvas.offset.y }),
   getCellSize: () => ({ w: CHAR_PIXELS_H, h: CHAR_PIXELS_V }),
+  getBackground: () => {
+    const background = store.currentCanvas.background;
+    return background
+      ? {
+          naturalW: background.naturalW,
+          naturalH: background.naturalH,
+          scale: background.scale,
+          opacity: background.opacity,
+          visible: background.visible,
+          centerCell: background.centerCell,
+        }
+      : null;
+  },
 };
 
 // tslint:disable-next-line: no-console

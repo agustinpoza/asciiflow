@@ -1,4 +1,5 @@
 import { ASCII, UNICODE } from "#asciiflow/client/constants";
+import { BackgroundControls } from "#asciiflow/client/background";
 import { ExportPanel } from "#asciiflow/client/export";
 import { DrawingId, store, ToolMode, useAppStore } from "#asciiflow/client/store";
 import { DrawingStringifier } from "#asciiflow/client/store/drawing_stringifier";
@@ -301,6 +302,7 @@ function ViewPanel() {
       <ActionBtn
         color="var(--color-success)"
         onClick={() => store.setShowGrid(!showGrid)}
+        data-testid="toggle-grid"
       >
         {showGrid ? "hide" : "show"}
       </ActionBtn>
@@ -314,6 +316,7 @@ function ViewPanel() {
       >
         {darkMode ? "go light" : "go dark"}
       </ActionBtn>
+      <BackgroundControls />
     </div>
   );
 }
@@ -434,6 +437,12 @@ function HelpContent() {
         )}
         <span><Kbd>alt</Kbd></span>
         <span>show tool shortcuts</span>
+      </div>
+      <div className={styles.helpDivider} />
+      <div className={styles.helpSection}>background image</div>
+      <div className={styles.helpGrid}>
+        <span style={{ color: "var(--color-accent)" }}>view → import</span>
+        <span>place an image behind the drawing. pick a scale before importing, then adjust opacity, size, or position from the view panel</span>
       </div>
       <div className={styles.helpDivider} />
       <div className={styles.helpSection}>links</div>

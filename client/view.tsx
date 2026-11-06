@@ -12,6 +12,46 @@ import { useEffect, useState, useCallback } from "react";
 /** Counter incremented after each actual canvas paint. */
 export let renderedVersion = 0;
 
+// Decoded background image cache. Decoding a data URL on every render would be
+// far too expensive, so we keep the last image around by its source string.
+let backgroundImageCache: {
+  dataUrl: string;
+  image: HTMLImageElement;
+  ready: boolean;
+  failed: boolean;
+} | null = null;
+
+function getBackgroundImage(dataUrl: string) {
+  if (backgroundImageCache && backgroundImageCache.dataUrl === dataUrl) {
+    return backgroundImageCache;
+  }
+  const entry = {
+    dataUrl,
+    image: new Image(),
+    ready: false,
+    failed: false,
+  };
+  entry.image.onload = () => {
+    entry.ready = true;
+    repaintCanvas();
+  };
+  entry.image.onerror = () => {
+    entry.failed = true;
+  };
+  entry.image.src = dataUrl;
+  backgroundImageCache = entry;
+  return entry;
+}
+
+function repaintCanvas() {
+  const canvas = document.getElementById(
+    "ascii-canvas"
+  ) as HTMLCanvasElement | null;
+  if (canvas) {
+    render(canvas);
+  }
+}
+
 function getColors() {
   const style = getComputedStyle(document.documentElement);
   return {
@@ -132,6 +172,39 @@ function render(canvas: HTMLCanvasElement) {
 
   const colors = getColors();
 
+  // Background image goes under the grid and the characters so the drawing
+  // stays readable. It uses the same world transform, so it pans and zooms
+  // together with the diagram.
+  const background = store.currentCanvas.background;
+  const backgroundVisible =
+    !!background && background.visible && background.opacity > 0;
+  // Overlays (scratch highlight, selection fill) are opaque by default. When an
+  // image is behind them they cover it while drawing, so make them translucent
+  // so the image stays visible through the cell being edited.
+  const overlayAlpha = backgroundVisible ? 0.35 : 1;
+  if (backgroundVisible && background) {
+    const image = background;
+    const cached = getBackgroundImage(image.dataUrl);
+    if (cached.ready) {
+      const width = image.naturalW * image.scale;
+      const height = image.naturalH * image.scale;
+      const centerX = image.centerCell.x * constants.CHAR_PIXELS_H;
+      const centerY = image.centerCell.y * constants.CHAR_PIXELS_V;
+      context.save();
+      context.globalAlpha = image.opacity;
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = "high";
+      context.drawImage(
+        cached.image,
+        centerX - width / 2 - offset.x,
+        centerY - height / 2 - offset.y,
+        width,
+        height
+      );
+      context.restore();
+    }
+  }
+
   // Render the grid.
   if (showGrid) {
     context.lineWidth = 1;
@@ -155,7 +228,8 @@ function render(canvas: HTMLCanvasElement) {
   }
   context.font = FONT_SPEC;
 
-  function highlight(position: Vector, color: string) {
+  function highlight(position: Vector, color: string, alpha = 1) {
+    context.globalAlpha = alpha;
     context.fillStyle = color;
     context.fillRect(
       position.x * constants.CHAR_PIXELS_H - offset.x + 0.5,
@@ -163,6 +237,7 @@ function render(canvas: HTMLCanvasElement) {
       constants.CHAR_PIXELS_H - 1,
       constants.CHAR_PIXELS_V - 1
     );
+    context.globalAlpha = 1;
   }
 
   function text(position: Vector, value: string) {
@@ -182,7 +257,7 @@ function render(canvas: HTMLCanvasElement) {
     const bottomRight = selection.bottomRight();
     for (let x = topLeft.x; x <= bottomRight.x; x++) {
       for (let y = topLeft.y; y <= bottomRight.y; y++) {
-        highlight(new Vector(x, y), colors.selection);
+        highlight(new Vector(x, y), colors.selection, overlayAlpha);
       }
     }
   }
@@ -191,7 +266,7 @@ function render(canvas: HTMLCanvasElement) {
     text(position, cellValue);
   }
   for (const [position] of scratch.entries()) {
-    highlight(position, colors.highlight);
+    highlight(position, colors.highlight, overlayAlpha);
     const cellValue = scratch.get(position);
     text(position, cellValue);
   }

@@ -523,6 +523,106 @@
   font-weight: bold;
 }
 
+/* --- Background image controls --- */
+
+.bgSlider {
+  width: 110px;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.bgScaleStep {
+  font-family: var(--font-mono);
+  font-size: var(--font-size);
+  background: none;
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  cursor: pointer;
+  padding: 0 var(--space-xs);
+  line-height: 1.2;
+}
+
+.bgScaleStep:hover {
+  background: var(--color-bg-hover);
+}
+
+/* --- Background import dialog --- */
+
+.bgDialogBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  /* Fixed width so the help text wraps instead of stretching the dialog. */
+  width: 360px;
+  max-width: 100%;
+}
+
+.bgRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  flex-wrap: wrap;
+}
+
+.bgFileLabel {
+  display: inline-block;
+  border: var(--border);
+  padding: var(--space-sm) var(--space-md);
+  color: var(--color-accent);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.bgFileLabel:hover {
+  background: var(--color-bg-hover);
+}
+
+.bgFileInput {
+  display: none;
+}
+
+.bgFileName {
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.bgPreviewBox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+  max-height: 220px;
+  overflow: hidden;
+  border: var(--border-light);
+  background: var(--color-canvas-bg);
+}
+
+.bgPreviewImage {
+  display: block;
+  max-width: 100%;
+  max-height: 200px;
+}
+
+.bgMeta {
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+.bgError {
+  color: var(--color-danger);
+}
+
+.bgNumberInput {
+  font-family: var(--font-mono);
+  font-size: var(--font-size);
+  width: 72px;
+  padding: var(--space-xs) var(--space-sm);
+  border: var(--border);
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
 /* --- Mobile: responsive top bar --- */
 
 @media (max-width: 768px) {
@@ -537,5 +637,9 @@
 
   .exportActions {
     margin-left: 0;
+  }
+
+  .bgSlider {
+    width: 80px;
   }
 }
